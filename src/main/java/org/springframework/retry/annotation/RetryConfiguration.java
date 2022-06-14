@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2022 the original author or authors.
+ * Copyright 2006-2022 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,6 +39,7 @@ import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.BeanFactoryAware;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.ListableBeanFactory;
+import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.context.annotation.Role;
 import org.springframework.core.OrderComparator;
@@ -51,7 +52,6 @@ import org.springframework.retry.policy.RetryContextCache;
 import org.springframework.stereotype.Component;
 import org.springframework.util.ObjectUtils;
 import org.springframework.util.ReflectionUtils;
-import org.springframework.util.ReflectionUtils.MethodCallback;
 
 /**
  * Basic configuration for <code>@Retryable</code> processing. For stateful retry, if
@@ -62,6 +62,7 @@ import org.springframework.util.ReflectionUtils.MethodCallback;
  * @author Dave Syer
  * @author Artem Bilan
  * @author Markus Heiden
+ * @author Gary Russell
  * @since 1.1
  *
  */
@@ -69,9 +70,9 @@ import org.springframework.util.ReflectionUtils.MethodCallback;
 @Role(BeanDefinition.ROLE_INFRASTRUCTURE)
 @Component
 public class RetryConfiguration extends AbstractPointcutAdvisor
-		implements IntroductionAdvisor, BeanFactoryAware, InitializingBean {
+		implements IntroductionAdvisor, BeanFactoryAware, InitializingBean, SmartInitializingSingleton {
 
-	private Advice advice;
+	private AnnotationAwareRetryOperationsInterceptor advice;
 
 	private Pointcut pointcut;
 
@@ -92,9 +93,8 @@ public class RetryConfiguration extends AbstractPointcutAdvisor
 		this.retryContextCache = findBean(RetryContextCache.class);
 		this.methodArgumentsKeyGenerator = findBean(MethodArgumentsKeyGenerator.class);
 		this.newMethodArgumentsIdentifier = findBean(NewMethodArgumentsIdentifier.class);
-		this.retryListeners = findBeans(RetryListener.class);
 		this.sleeper = findBean(Sleeper.class);
-		Set<Class<? extends Annotation>> retryableAnnotationTypes = new LinkedHashSet<Class<? extends Annotation>>(1);
+		Set<Class<? extends Annotation>> retryableAnnotationTypes = new LinkedHashSet<>(1);
 		retryableAnnotationTypes.add(Retryable.class);
 		this.pointcut = buildPointcut(retryableAnnotationTypes);
 		this.advice = buildAdvice();
@@ -103,11 +103,19 @@ public class RetryConfiguration extends AbstractPointcutAdvisor
 		}
 	}
 
+	@Override
+	public void afterSingletonsInstantiated() {
+		this.retryListeners = findBeans(RetryListener.class);
+		if (this.retryListeners != null) {
+			this.advice.setListeners(this.retryListeners);
+		}
+	}
+
 	private <T> List<T> findBeans(Class<? extends T> type) {
 		if (this.beanFactory instanceof ListableBeanFactory) {
 			ListableBeanFactory listable = (ListableBeanFactory) this.beanFactory;
 			if (listable.getBeanNamesForType(type).length > 0) {
-				ArrayList<T> list = new ArrayList<T>(listable.getBeansOfType(type, false, false).values());
+				ArrayList<T> list = new ArrayList<>(listable.getBeansOfType(type, false, false).values());
 				OrderComparator.sort(list);
 				return list;
 			}
@@ -157,13 +165,10 @@ public class RetryConfiguration extends AbstractPointcutAdvisor
 		return this.pointcut;
 	}
 
-	protected Advice buildAdvice() {
+	protected AnnotationAwareRetryOperationsInterceptor buildAdvice() {
 		AnnotationAwareRetryOperationsInterceptor interceptor = new AnnotationAwareRetryOperationsInterceptor();
 		if (this.retryContextCache != null) {
 			interceptor.setRetryContextCache(this.retryContextCache);
-		}
-		if (this.retryListeners != null) {
-			interceptor.setListeners(this.retryListeners);
 		}
 		if (this.methodArgumentsKeyGenerator != null) {
 			interceptor.setKeyGenerator(this.methodArgumentsKeyGenerator);
@@ -242,7 +247,7 @@ public class RetryConfiguration extends AbstractPointcutAdvisor
 
 	private static class AnnotationMethodsResolver {
 
-		private Class<? extends Annotation> annotationType;
+		private final Class<? extends Annotation> annotationType;
 
 		public AnnotationMethodsResolver(Class<? extends Annotation> annotationType) {
 			this.annotationType = annotationType;
@@ -250,17 +255,14 @@ public class RetryConfiguration extends AbstractPointcutAdvisor
 
 		public boolean hasAnnotatedMethods(Class<?> clazz) {
 			final AtomicBoolean found = new AtomicBoolean(false);
-			ReflectionUtils.doWithMethods(clazz, new MethodCallback() {
-				@Override
-				public void doWith(Method method) throws IllegalArgumentException, IllegalAccessException {
-					if (found.get()) {
-						return;
-					}
-					Annotation annotation = AnnotationUtils.findAnnotation(method,
-							AnnotationMethodsResolver.this.annotationType);
-					if (annotation != null) {
-						found.set(true);
-					}
+			ReflectionUtils.doWithMethods(clazz, method -> {
+				if (found.get()) {
+					return;
+				}
+				Annotation annotation = AnnotationUtils.findAnnotation(method,
+						AnnotationMethodsResolver.this.annotationType);
+				if (annotation != null) {
+					found.set(true);
 				}
 			});
 			return found.get();

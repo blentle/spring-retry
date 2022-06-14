@@ -1,5 +1,5 @@
 /*
- * Copyright 2006-2007 the original author or authors.
+ * Copyright 2006-2022 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,22 +28,21 @@ import java.util.List;
 @SuppressWarnings("serial")
 public class DummySleeper implements Sleeper {
 
-	private List<Long> backOffs = new ArrayList<Long>();
+	private final List<Long> backOffs = new ArrayList<>();
 
 	/**
 	 * Public getter for the long.
 	 * @return the lastBackOff
 	 */
 	public long getLastBackOff() {
-		return backOffs.get(backOffs.size() - 1).longValue();
+		return backOffs.get(backOffs.size() - 1);
 	}
 
 	public long[] getBackOffs() {
 		long[] result = new long[backOffs.size()];
 		int i = 0;
-		for (Iterator<Long> iterator = backOffs.iterator(); iterator.hasNext();) {
-			Long value = iterator.next();
-			result[i++] = value.longValue();
+		for (Long value : backOffs) {
+			result[i++] = value;
 		}
 		return result;
 	}
@@ -54,7 +53,7 @@ public class DummySleeper implements Sleeper {
 	 * @see org.springframework.batch.retry.backoff.Sleeper#sleep(long)
 	 */
 	public void sleep(long backOffPeriod) throws InterruptedException {
-		this.backOffs.add(Long.valueOf(backOffPeriod));
+		this.backOffs.add(backOffPeriod);
 	}
 
 }

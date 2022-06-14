@@ -1,5 +1,5 @@
 /*
- * Copyright 2006-2007 the original author or authors.
+ * Copyright 2006-2022 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,14 +16,11 @@
 
 package org.springframework.retry.listener;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.fail;
-
 import java.util.ArrayList;
 import java.util.List;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+
 import org.springframework.retry.RetryCallback;
 import org.springframework.retry.RetryContext;
 import org.springframework.retry.RetryListener;
@@ -31,16 +28,20 @@ import org.springframework.retry.TerminatedRetryException;
 import org.springframework.retry.policy.NeverRetryPolicy;
 import org.springframework.retry.support.RetryTemplate;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
+
 public class RetryListenerTests {
 
 	RetryTemplate template = new RetryTemplate();
 
 	int count = 0;
 
-	List<String> list = new ArrayList<String>();
+	List<String> list = new ArrayList<>();
 
 	@Test
-	public void testOpenInterceptors() throws Throwable {
+	public void testOpenInterceptors() {
 		template.setListeners(new RetryListener[] { new RetryListenerSupport() {
 			public <T, E extends Throwable> boolean open(RetryContext context, RetryCallback<T, E> callback) {
 				count++;
@@ -54,43 +55,31 @@ public class RetryListenerTests {
 				return true;
 			}
 		} });
-		template.execute(new RetryCallback<String, Exception>() {
-			public String doWithRetry(RetryContext context) throws Exception {
-				return null;
-			}
-		});
-		assertEquals(2, count);
-		assertEquals(2, list.size());
-		assertEquals("1:1", list.get(0));
+		template.execute(context -> null);
+		assertThat(count).isEqualTo(2);
+		assertThat(list).hasSize(2);
+		assertThat(list.get(0)).isEqualTo("1:1");
 	}
 
 	@Test
-	public void testOpenCanVetoRetry() throws Throwable {
+	public void testOpenCanVetoRetry() {
 		template.registerListener(new RetryListenerSupport() {
 			public <T, E extends Throwable> boolean open(RetryContext context, RetryCallback<T, E> callback) {
 				list.add("1");
 				return false;
 			}
 		});
-		try {
-			template.execute(new RetryCallback<String, Exception>() {
-				public String doWithRetry(RetryContext context) throws Exception {
-					count++;
-					return null;
-				}
-			});
-			fail("Expected TerminatedRetryException");
-		}
-		catch (TerminatedRetryException e) {
-			// expected
-		}
-		assertEquals(0, count);
-		assertEquals(1, list.size());
-		assertEquals("1", list.get(0));
+		assertThatExceptionOfType(TerminatedRetryException.class).isThrownBy(() -> template.execute(context -> {
+			count++;
+			return null;
+		}));
+		assertThat(count).isEqualTo(0);
+		assertThat(list).hasSize(1);
+		assertThat(list.get(0)).isEqualTo("1");
 	}
 
 	@Test
-	public void testCloseInterceptors() throws Throwable {
+	public void testCloseInterceptors() {
 		template.setListeners(new RetryListener[] { new RetryListenerSupport() {
 			public <T, E extends Throwable> void close(RetryContext context, RetryCallback<T, E> callback,
 					Throwable t) {
@@ -104,19 +93,15 @@ public class RetryListenerTests {
 				list.add("2:" + count);
 			}
 		} });
-		template.execute(new RetryCallback<String, Exception>() {
-			public String doWithRetry(RetryContext context) throws Exception {
-				return null;
-			}
-		});
-		assertEquals(2, count);
-		assertEquals(2, list.size());
+		template.execute(context -> null);
+		assertThat(count).isEqualTo(2);
+		assertThat(list).hasSize(2);
 		// interceptors are called in reverse order on close...
-		assertEquals("2:1", list.get(0));
+		assertThat(list.get(0)).isEqualTo("2:1");
 	}
 
 	@Test
-	public void testOnError() throws Throwable {
+	public void testOnError() {
 		template.setRetryPolicy(new NeverRetryPolicy());
 		template.setListeners(new RetryListener[] { new RetryListenerSupport() {
 			public <T, E extends Throwable> void onError(RetryContext context, RetryCallback<T, E> callback,
@@ -129,48 +114,38 @@ public class RetryListenerTests {
 				list.add("2");
 			}
 		} });
-		try {
-			template.execute(new RetryCallback<String, Exception>() {
-				public String doWithRetry(RetryContext context) throws Exception {
-					count++;
-					throw new IllegalStateException("foo");
-				}
-			});
-			fail("Expected IllegalStateException");
-		}
-		catch (IllegalStateException e) {
-			assertEquals("foo", e.getMessage());
-		}
+		assertThatIllegalStateException().isThrownBy(() -> template.execute(context -> {
+			count++;
+			throw new IllegalStateException("foo");
+		})).withMessage("foo");
 		// never retry so callback is executed once
-		assertEquals(1, count);
-		assertEquals(2, list.size());
+		assertThat(count).isEqualTo(1);
+		assertThat(list).hasSize(2);
 		// interceptors are called in reverse order on error...
-		assertEquals("2", list.get(0));
+		assertThat(list.get(0)).isEqualTo("2");
 
 	}
 
 	@Test
-	public void testCloseInterceptorsAfterRetry() throws Throwable {
+	public void testCloseInterceptorsAfterRetry() {
 		template.registerListener(new RetryListenerSupport() {
 			public <T, E extends Throwable> void close(RetryContext context, RetryCallback<T, E> callback,
 					Throwable t) {
 				list.add("" + count);
 				// The last attempt should have been successful:
-				assertNull(t);
+				assertThat(t).isNull();
 			}
 		});
-		template.execute(new RetryCallback<String, Exception>() {
-			public String doWithRetry(RetryContext context) throws Exception {
-				if (count++ < 1)
-					throw new RuntimeException("Retry!");
-				return null;
-			}
+		template.execute(context -> {
+			if (count++ < 1)
+				throw new RuntimeException("Retry!");
+			return null;
 		});
-		assertEquals(2, count);
+		assertThat(count).isEqualTo(2);
 		// The close interceptor was only called once:
-		assertEquals(1, list.size());
+		assertThat(list).hasSize(1);
 		// We succeeded on the second try:
-		assertEquals("2", list.get(0));
+		assertThat(list.get(0)).isEqualTo("2");
 	}
 
 }

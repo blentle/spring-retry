@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2019 the original author or authors.
+ * Copyright 2015-2022 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,9 +17,10 @@
 package org.springframework.retry.annotation;
 
 import java.util.Map;
+import java.util.function.Supplier;
 
 import org.aopalliance.intercept.MethodInterceptor;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import org.springframework.aop.Advisor;
 import org.springframework.aop.framework.Advised;
@@ -31,11 +32,10 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.retry.RetryContext;
 import org.springframework.retry.policy.CircuitBreakerRetryPolicy;
 import org.springframework.retry.support.RetrySynchronizationManager;
+import org.springframework.retry.util.test.TestUtils;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 /**
  * @author Dave Syer
@@ -48,52 +48,72 @@ public class CircuitBreakerTests {
 	public void vanilla() throws Exception {
 		AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext(TestConfiguration.class);
 		Service service = context.getBean(Service.class);
-		assertTrue(AopUtils.isAopProxy(service));
-		try {
-			service.service();
-			fail("Expected exception");
-		}
-		catch (Exception e) {
-		}
-		assertFalse((Boolean) service.getContext().getAttribute(CircuitBreakerRetryPolicy.CIRCUIT_OPEN));
-		try {
-			service.service();
-			fail("Expected exception");
-		}
-		catch (Exception e) {
-		}
-		assertFalse((Boolean) service.getContext().getAttribute(CircuitBreakerRetryPolicy.CIRCUIT_OPEN));
-		try {
-			service.service();
-			fail("Expected exception");
-		}
-		catch (Exception e) {
-		}
-		assertTrue((Boolean) service.getContext().getAttribute(CircuitBreakerRetryPolicy.CIRCUIT_OPEN));
-		assertEquals(3, service.getCount());
-		try {
-			service.service();
-			fail("Expected exception");
-		}
-		catch (Exception e) {
-		}
+		assertThat(AopUtils.isAopProxy(service)).isTrue();
+		assertThatExceptionOfType(Exception.class).isThrownBy(() -> service.service());
+		assertThat((Boolean) service.getContext().getAttribute(CircuitBreakerRetryPolicy.CIRCUIT_OPEN)).isFalse();
+		assertThatExceptionOfType(Exception.class).isThrownBy(() -> service.service());
+		assertThat((Boolean) service.getContext().getAttribute(CircuitBreakerRetryPolicy.CIRCUIT_OPEN)).isFalse();
+		assertThatExceptionOfType(Exception.class).isThrownBy(() -> service.service());
+		assertThat((Boolean) service.getContext().getAttribute(CircuitBreakerRetryPolicy.CIRCUIT_OPEN)).isTrue();
+		assertThat(service.getCount()).isEqualTo(3);
+		assertThatExceptionOfType(Exception.class).isThrownBy(() -> service.service());
 		// Not called again once circuit is open
-		assertEquals(3, service.getCount());
+		assertThat(service.getCount()).isEqualTo(3);
 		service.expressionService();
-		assertEquals(4, service.getCount());
+		assertThat(service.getCount()).isEqualTo(4);
+		service.expressionService2();
+		assertThat(service.getCount()).isEqualTo(5);
 		Advised advised = (Advised) service;
 		Advisor advisor = advised.getAdvisors()[0];
 		Map<?, ?> delegates = (Map<?, ?>) new DirectFieldAccessor(advisor).getPropertyValue("advice.delegates");
-		assertTrue(delegates.size() == 1);
+		assertThat(delegates).hasSize(1);
 		Map<?, ?> methodMap = (Map<?, ?>) delegates.values().iterator().next();
 		MethodInterceptor interceptor = (MethodInterceptor) methodMap
 				.get(Service.class.getDeclaredMethod("expressionService"));
 		DirectFieldAccessor accessor = new DirectFieldAccessor(interceptor);
-		assertEquals(8, accessor.getPropertyValue("retryOperations.retryPolicy.delegate.maxAttempts"));
-		assertEquals(19000L, accessor.getPropertyValue("retryOperations.retryPolicy.openTimeout"));
-		assertEquals(20000L, accessor.getPropertyValue("retryOperations.retryPolicy.resetTimeout"));
-		assertEquals("#root instanceof RuntimeExpression",
-				accessor.getPropertyValue("retryOperations.retryPolicy.delegate.expression.expression"));
+		assertThat(accessor.getPropertyValue("retryOperations.retryPolicy.delegate.maxAttempts")).isEqualTo(8);
+		assertThat(accessor.getPropertyValue("retryOperations.retryPolicy.openTimeout")).isEqualTo(19000L);
+		assertThat(accessor.getPropertyValue("retryOperations.retryPolicy.resetTimeout")).isEqualTo(20000L);
+		assertThat(accessor.getPropertyValue("retryOperations.retryPolicy.delegate.expression.expression"))
+				.isEqualTo("#root instanceof RuntimeExpression");
+
+		interceptor = (MethodInterceptor) methodMap.get(Service.class.getDeclaredMethod("expressionService2"));
+		accessor = new DirectFieldAccessor(interceptor);
+		assertThat(accessor.getPropertyValue("retryOperations.retryPolicy.delegate.maxAttempts")).isEqualTo(10);
+		assertThat(accessor.getPropertyValue("retryOperations.retryPolicy.openTimeout")).isEqualTo(10000L);
+		assertThat(accessor.getPropertyValue("retryOperations.retryPolicy.resetTimeout")).isEqualTo(20000L);
+		context.close();
+	}
+
+	@Test
+	void runtimeExpressions() throws Exception {
+		AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext(TestConfiguration.class);
+		Service service = context.getBean(Service.class);
+		assertThat(AopUtils.isAopProxy(service)).isTrue();
+		service.expressionService3();
+		assertThat(service.getCount()).isEqualTo(1);
+		Advised advised = (Advised) service;
+		Advisor advisor = advised.getAdvisors()[0];
+		Map<?, ?> delegates = (Map<?, ?>) new DirectFieldAccessor(advisor).getPropertyValue("advice.delegates");
+		assertThat(delegates).hasSize(1);
+		Map<?, ?> methodMap = (Map<?, ?>) delegates.values().iterator().next();
+		MethodInterceptor interceptor = (MethodInterceptor) methodMap
+				.get(Service.class.getDeclaredMethod("expressionService3"));
+		Supplier<?> maxAttempts = TestUtils.getPropertyValue(interceptor,
+				"retryOperations.retryPolicy.delegate.maxAttemptsSupplier", Supplier.class);
+		assertThat(maxAttempts).isNotNull();
+		assertThat(maxAttempts.get()).isEqualTo(10);
+		CircuitBreakerRetryPolicy policy = TestUtils.getPropertyValue(interceptor, "retryOperations.retryPolicy",
+				CircuitBreakerRetryPolicy.class);
+		Supplier openTO = TestUtils.getPropertyValue(policy, "openTimeoutSupplier", Supplier.class);
+		assertThat(openTO).isNotNull();
+		assertThat(openTO.get()).isEqualTo(10000L);
+		Supplier resetTO = TestUtils.getPropertyValue(policy, "resetTimeoutSupplier", Supplier.class);
+		assertThat(resetTO).isNotNull();
+		assertThat(resetTO.get()).isEqualTo(20000L);
+		RetryContext ctx = service.getContext();
+		assertThat(TestUtils.getPropertyValue(ctx, "openWindow")).isEqualTo(10000L);
+		assertThat(TestUtils.getPropertyValue(ctx, "timeout")).isEqualTo(20000L);
 		context.close();
 	}
 
@@ -106,6 +126,21 @@ public class CircuitBreakerTests {
 			return new ServiceImpl();
 		}
 
+		@Bean
+		Configs configs() {
+			return new Configs();
+		}
+
+	}
+
+	public static class Configs {
+
+		public int maxAttempts = 10;
+
+		public long openTimeout = 10000;
+
+		public long resetTimeout = 20000;
+
 	}
 
 	interface Service {
@@ -113,6 +148,10 @@ public class CircuitBreakerTests {
 		void service();
 
 		void expressionService();
+
+		void expressionService2();
+
+		void expressionService3();
 
 		int getCount();
 
@@ -122,9 +161,9 @@ public class CircuitBreakerTests {
 
 	protected static class ServiceImpl implements Service {
 
-		private int count = 0;
+		int count = 0;
 
-		private RetryContext context;
+		RetryContext context;
 
 		@Override
 		@CircuitBreaker(RuntimeException.class)
@@ -140,6 +179,21 @@ public class CircuitBreakerTests {
 				resetTimeoutExpression = "#{${baz:20}000}",
 				exceptionExpression = "#{#root instanceof RuntimeExpression}")
 		public void expressionService() {
+			this.count++;
+		}
+
+		@Override
+		@CircuitBreaker(maxAttemptsExpression = "#{@configs.maxAttempts}",
+				openTimeoutExpression = "#{@configs.openTimeout}", resetTimeoutExpression = "#{@configs.resetTimeout}")
+		public void expressionService2() {
+			this.count++;
+		}
+
+		@Override
+		@CircuitBreaker(maxAttemptsExpression = "@configs.maxAttempts", openTimeoutExpression = "@configs.openTimeout",
+				resetTimeoutExpression = "@configs.resetTimeout")
+		public void expressionService3() {
+			this.context = RetrySynchronizationManager.getContext();
 			this.count++;
 		}
 

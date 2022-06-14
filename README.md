@@ -1,4 +1,4 @@
-[![ci.spring.io](https://ci.spring.io/api/v1/teams/spring-retry/pipelines/spring-retry-1.3.x/jobs/build/badge)](https://ci.spring.io/teams/spring-retry/pipelines/spring-retry-1.3.x) [![Javadocs](https://www.javadoc.io/badge/org.springframework.retry/spring-retry.svg)](https://www.javadoc.io/doc/org.springframework.retry/spring-retry)
+[![ci.spring.io](https://ci.spring.io/api/v2/teams/spring-retry/pipelines/spring-retry-2.0.x/jobs/build/badge)](https://ci.spring.io/teams/spring-retry/pipelines/spring-retry-2.0.x) [![Javadocs](https://www.javadoc.io/badge/org.springframework.retry/spring-retry.svg)](https://www.javadoc.io/doc/org.springframework.retry/spring-retry)
 
 This project provides declarative retry support for Spring
 applications. It is used in Spring Batch, Spring Integration, and
@@ -18,11 +18,6 @@ The following example shows how to use Spring Retry in its declarative style:
 @Configuration
 @EnableRetry
 public class Application {
-
-    @Bean
-    public Service service() {
-        return new Service();
-    }
 
 }
 
@@ -350,26 +345,34 @@ public interface RetryListener {
 
     void open(RetryContext context, RetryCallback<T> callback);
 
+    void onSuccess(RetryContext context, T result);
+
     void onError(RetryContext context, RetryCallback<T> callback, Throwable e);
 
     void close(RetryContext context, RetryCallback<T> callback, Throwable e);
+
 }
 ```
 
-The `open` and `close` callbacks come before and after the entire retry in the simplest
-case, and `onError` applies to the individual `RetryCallback` calls. The close method
-might also receive a `Throwable`. If there has been an error, it is the last one thrown by
-the `RetryCallback`.
+The `open` and `close` callbacks come before and after the entire retry in the simplest case, and `onSuccess`, `onError` apply to the individual `RetryCallback` calls; the current retry count can be obtained from the `RetryContext`.
+The close method might also receive a `Throwable`.
+Starting with version 2.0, the `onSuccess` method is called after a successful call to the callback.
+This allows the listener to examine the result and throw an exception if the result doesn't match some expected criteria.
+The type of the exception thrown is then used to determine whether the call should be retried or not, based on the retry policy.
+If there has been an error, it is the last one thrown by the `RetryCallback`.
 
 Note that when there is more than one listener, they are in a list, so there is an order.
-In this case, `open` is called in the same order, while `onError` and `close` are called
-in reverse order.
+In this case, `open` is called in the same order, while `onSuccess`, `onError`, and `close` are called in reverse order.
+
+`RetryListenerSupport` is provided, with no-op implementations; you can extend this class if you don't need to implement all of the `RetryListener` methods.
 
 ### Listeners for Reflective Method Invocations
 
 When dealing with methods that are annotated with `@Retryable` or with Spring AOP intercepted methods, Spring Retry allows a detailed inspection of the method invocation within the `RetryListener` implementation.
 
 Such a scenario could be particularly useful when there is a need to monitor how often a certain method call has been retried and expose it with detailed tagging information (such as class name, method name, or even parameter values in some exotic cases).
+
+Starting with version 2.0, the `MethodInvocationRetryListenerSupport` has a new method `doOnSuccess`.
 
 The following example registers such a listener:
 
@@ -388,6 +391,17 @@ template.registerListener(new MethodInvocationRetryListenerSupport() {
 
         // register a monitoring counter with appropriate tags
         // ...
+
+        @Override
+        protected <T, E extends Throwable> void doOnSuccess(RetryContext context,
+                MethodInvocationRetryCallback<T, E> callback, T result) {
+
+            Object[] arguments = callback.getInvocation().getArguments();
+
+            // decide whether the result for the given arguments should be accepted
+            // or retried according to the retry policy
+        }
+
       }
     });
 ```
@@ -574,7 +588,34 @@ Expressions can contain property placeholders, such as `#{${max.delay}}` or
 - `exceptionExpression` is evaluated against the thrown exception as the `#root` object.
 - `maxAttemptsExpression` and the `@BackOff` expression attributes are evaluated once,
 during initialization. There is no root object for the evaluation but they can reference
-other beans in the context.
+other beans in the context
+
+Starting with version 2.0, expressions in `@Retryable`, `@CircuitBreaker`, and `BackOff` can be evaluated once, during application initialization, or at runtime.
+With earlier versions, evaluation was always performed during initialization (except for `Retryable.exceptionExpression` which is always evaluated at runtime).
+When evaluating at runtime, a root object containing the method arguments is passed to the evaluation context.
+
+**Note:** The arguments are not available until the method has been called at least once; they will be null initially, which means, for example, you can't set the initial `maxAttempts` using an argument value, you can, however, change the `maxAttempts` after the first failure and before any retries are performed.
+Also, the arguments are only available when using stateless retry (which includes the `@CircuitBreaker`).
+
+##### Examples
+
+```java
+@Retryable(maxAttemptsExpression = "@runtimeConfigs.maxAttempts",
+        backoff = @Backoff(delayExpression = "@runtimeConfigs.initial",
+                maxDelayExpression = "@runtimeConfigs.max", multiplierExpression = "@runtimeConfigs.mult"))
+public void service() {
+    ...
+}
+```
+
+Where `runtimeConfigs` is a bean with those properties.
+
+```java
+@Retryable(maxAttemptsExpression = "args[0] == 'foo' ? 3 : 1")
+public void conditional(String string) {
+    ...
+}
+```
 
 #### <a name="Additional_Dependencies"></a> Additional Dependencies
 

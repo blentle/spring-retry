@@ -16,9 +16,8 @@
 
 package org.springframework.retry.annotation;
 
-import static org.junit.Assert.assertFalse;
+import org.junit.jupiter.api.Test;
 
-import org.junit.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -26,12 +25,14 @@ import org.springframework.retry.RetryContext;
 import org.springframework.retry.policy.CircuitBreakerRetryPolicy;
 import org.springframework.retry.support.RetrySynchronizationManager;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 public class CircuitBreakerResetTimeoutTests {
 
-	private AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext(
+	private final AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext(
 			CircuitBreakerResetTimeoutTests.TestConfiguration.class);
 
-	private TestService serviceInTest = context.getBean(TestService.class);
+	private final TestService serviceInTest = context.getBean(TestService.class);
 
 	@Test
 	public void circuitBreakerShouldBeClosedAfterResetTimeout() throws InterruptedException {
@@ -44,7 +45,7 @@ public class CircuitBreakerResetTimeoutTests {
 		correctStep(timeOfLastFailure);
 		correctStep(timeOfLastFailure);
 		correctStep(timeOfLastFailure);
-		assertFalse((Boolean) serviceInTest.getContext().getAttribute(CircuitBreakerRetryPolicy.CIRCUIT_OPEN));
+		assertThat((Boolean) serviceInTest.getContext().getAttribute(CircuitBreakerRetryPolicy.CIRCUIT_OPEN)).isFalse();
 	}
 
 	private void incorrectStep() {

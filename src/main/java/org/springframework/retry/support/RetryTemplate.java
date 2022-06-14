@@ -1,5 +1,5 @@
 /*
- * Copyright 2006-2020 the original author or authors.
+ * Copyright 2006-2022 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -159,7 +159,7 @@ public class RetryTemplate implements RetryOperations {
 	 * @see #setListeners(RetryListener[])
 	 */
 	public void registerListener(RetryListener listener, int index) {
-		List<RetryListener> list = new ArrayList<RetryListener>(Arrays.asList(this.listeners));
+		List<RetryListener> list = new ArrayList<>(Arrays.asList(this.listeners));
 		if (index >= list.size()) {
 			list.add(listener);
 		}
@@ -326,7 +326,9 @@ public class RetryTemplate implements RetryOperations {
 					// Reset the last exception, so if we are successful
 					// the close interceptors will not think we failed...
 					lastException = null;
-					return retryCallback.doWithRetry(context);
+					T result = retryCallback.doWithRetry(context);
+					doOnSuccessInterceptors(retryCallback, context, result);
+					return result;
 				}
 				catch (Throwable e) {
 
@@ -587,6 +589,13 @@ public class RetryTemplate implements RetryOperations {
 			Throwable lastException) {
 		for (int i = this.listeners.length; i-- > 0;) {
 			this.listeners[i].close(context, callback, lastException);
+		}
+	}
+
+	private <T, E extends Throwable> void doOnSuccessInterceptors(RetryCallback<T, E> callback, RetryContext context,
+			T result) {
+		for (int i = this.listeners.length; i-- > 0;) {
+			this.listeners[i].onSuccess(context, callback, result);
 		}
 	}
 

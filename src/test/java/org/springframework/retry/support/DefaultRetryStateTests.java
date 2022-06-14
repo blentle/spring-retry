@@ -1,5 +1,5 @@
 /*
- * Copyright 2006-2007 the original author or authors.
+ * Copyright 2006-2022 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,15 +15,13 @@
  */
 package org.springframework.retry.support;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import org.junit.jupiter.api.Test;
 
-import org.junit.Test;
-import org.springframework.classify.Classifier;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * @author Dave Syer
+ * @author Gary Russell
  *
  */
 public class DefaultRetryStateTests {
@@ -35,14 +33,10 @@ public class DefaultRetryStateTests {
 	@SuppressWarnings("serial")
 	@Test
 	public void testDefaultRetryStateObjectBooleanClassifierOfQsuperThrowableBoolean() {
-		DefaultRetryState state = new DefaultRetryState("foo", true, new Classifier<Throwable, Boolean>() {
-			public Boolean classify(Throwable classifiable) {
-				return false;
-			}
-		});
-		assertEquals("foo", state.getKey());
-		assertTrue(state.isForceRefresh());
-		assertFalse(state.rollbackFor(null));
+		DefaultRetryState state = new DefaultRetryState("foo", true, classifiable -> false);
+		assertThat(state.getKey()).isEqualTo("foo");
+		assertThat(state.isForceRefresh()).isTrue();
+		assertThat(state.rollbackFor(null)).isFalse();
 	}
 
 	/**
@@ -52,14 +46,10 @@ public class DefaultRetryStateTests {
 	@SuppressWarnings("serial")
 	@Test
 	public void testDefaultRetryStateObjectClassifierOfQsuperThrowableBoolean() {
-		DefaultRetryState state = new DefaultRetryState("foo", new Classifier<Throwable, Boolean>() {
-			public Boolean classify(Throwable classifiable) {
-				return false;
-			}
-		});
-		assertEquals("foo", state.getKey());
-		assertFalse(state.isForceRefresh());
-		assertFalse(state.rollbackFor(null));
+		DefaultRetryState state = new DefaultRetryState("foo", classifiable -> false);
+		assertThat(state.getKey()).isEqualTo("foo");
+		assertThat(state.isForceRefresh()).isFalse();
+		assertThat(state.rollbackFor(null)).isFalse();
 	}
 
 	/**
@@ -69,9 +59,9 @@ public class DefaultRetryStateTests {
 	@Test
 	public void testDefaultRetryStateObjectBoolean() {
 		DefaultRetryState state = new DefaultRetryState("foo", true);
-		assertEquals("foo", state.getKey());
-		assertTrue(state.isForceRefresh());
-		assertTrue(state.rollbackFor(null));
+		assertThat(state.getKey()).isEqualTo("foo");
+		assertThat(state.isForceRefresh()).isTrue();
+		assertThat(state.rollbackFor(null)).isTrue();
 	}
 
 	/**
@@ -81,9 +71,9 @@ public class DefaultRetryStateTests {
 	@Test
 	public void testDefaultRetryStateObject() {
 		DefaultRetryState state = new DefaultRetryState("foo");
-		assertEquals("foo", state.getKey());
-		assertFalse(state.isForceRefresh());
-		assertTrue(state.rollbackFor(null));
+		assertThat(state.getKey()).isEqualTo("foo");
+		assertThat(state.isForceRefresh()).isFalse();
+		assertThat(state.rollbackFor(null)).isTrue();
 	}
 
 }

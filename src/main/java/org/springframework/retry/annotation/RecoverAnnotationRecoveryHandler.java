@@ -1,5 +1,5 @@
 /*
- * Copyright 2013-2019 the original author or authors.
+ * Copyright 2006-2022 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@ import org.springframework.retry.ExhaustedRetryException;
 import org.springframework.retry.RetryContext;
 import org.springframework.retry.interceptor.MethodInvocationRecoverer;
 import org.springframework.retry.support.RetrySynchronizationManager;
+import org.springframework.util.ClassUtils;
 import org.springframework.util.ReflectionUtils;
 import org.springframework.util.ReflectionUtils.MethodCallback;
 import org.springframework.util.StringUtils;
@@ -43,6 +44,7 @@ import org.springframework.util.StringUtils;
  * handled and there is a method whose first argument is RuntimeException, then it will be
  * preferred over a method whose first argument is Throwable.
  *
+ * @param <T> the type of the return value from the recovery
  * @author Dave Syer
  * @author Josh Long
  * @author Aldo Sinanaj
@@ -50,15 +52,15 @@ import org.springframework.util.StringUtils;
  * @author Nathanaël Roberts
  * @author Maksim Kita
  * @author Gary Russell
- * @param <T> the type of the return value from the recovery
+ * @author Artem Bilan
  */
 public class RecoverAnnotationRecoveryHandler<T> implements MethodInvocationRecoverer<T> {
 
-	private SubclassClassifier<Throwable, Method> classifier = new SubclassClassifier<Throwable, Method>();
+	private final SubclassClassifier<Throwable, Method> classifier = new SubclassClassifier<>();
 
-	private Map<Method, SimpleMetadata> methods = new HashMap<Method, SimpleMetadata>();
+	private final Map<Method, SimpleMetadata> methods = new HashMap<>();
 
-	private Object target;
+	private final Object target;
 
 	private String recoverMethodName;
 
@@ -110,10 +112,7 @@ public class RecoverAnnotationRecoveryHandler<T> implements MethodInvocationReco
 		try {
 			return proxy.getClass().getMethod(method.getName(), method.getParameterTypes());
 		}
-		catch (NoSuchMethodException e) {
-			return null;
-		}
-		catch (SecurityException e) {
+		catch (NoSuchMethodException | SecurityException e) {
 			return null;
 		}
 	}
@@ -183,7 +182,9 @@ public class RecoverAnnotationRecoveryHandler<T> implements MethodInvocationReco
 				if (argument == null) {
 					continue;
 				}
-				if (!parameterTypes[i].isAssignableFrom(argument.getClass())) {
+				Class<?> parameterType = parameterTypes[i];
+				parameterType = ClassUtils.resolvePrimitiveIfNecessary(parameterType);
+				if (!parameterType.isAssignableFrom(argument.getClass())) {
 					return false;
 				}
 			}
@@ -193,29 +194,26 @@ public class RecoverAnnotationRecoveryHandler<T> implements MethodInvocationReco
 	}
 
 	private void init(final Object target, Method method) {
-		final Map<Class<? extends Throwable>, Method> types = new HashMap<Class<? extends Throwable>, Method>();
+		final Map<Class<? extends Throwable>, Method> types = new HashMap<>();
 		final Method failingMethod = method;
 		Retryable retryable = AnnotationUtils.findAnnotation(method, Retryable.class);
 		if (retryable != null) {
 			this.recoverMethodName = retryable.recover();
 		}
-		ReflectionUtils.doWithMethods(target.getClass(), new MethodCallback() {
-			@Override
-			public void doWith(Method method) throws IllegalArgumentException, IllegalAccessException {
-				Recover recover = AnnotationUtils.findAnnotation(method, Recover.class);
-				if (recover == null) {
-					recover = findAnnotationOnTarget(target, method);
+		ReflectionUtils.doWithMethods(target.getClass(), candidate -> {
+			Recover recover = AnnotationUtils.findAnnotation(candidate, Recover.class);
+			if (recover == null) {
+				recover = findAnnotationOnTarget(target, candidate);
+			}
+			if (recover != null && failingMethod.getGenericReturnType() instanceof ParameterizedType
+					&& candidate.getGenericReturnType() instanceof ParameterizedType) {
+				if (isParameterizedTypeAssignable((ParameterizedType) candidate.getGenericReturnType(),
+						(ParameterizedType) failingMethod.getGenericReturnType())) {
+					putToMethodsMap(candidate, types);
 				}
-				if (recover != null && failingMethod.getGenericReturnType() instanceof ParameterizedType
-						&& method.getGenericReturnType() instanceof ParameterizedType) {
-					if (isParameterizedTypeAssignable((ParameterizedType) method.getGenericReturnType(),
-							(ParameterizedType) failingMethod.getGenericReturnType())) {
-						putToMethodsMap(method, types);
-					}
-				}
-				else if (recover != null && method.getReturnType().isAssignableFrom(failingMethod.getReturnType())) {
-					putToMethodsMap(method, types);
-				}
+			}
+			else if (recover != null && candidate.getReturnType().isAssignableFrom(failingMethod.getReturnType())) {
+				putToMethodsMap(candidate, types);
 			}
 		});
 		this.classifier.setTypeMap(types);
@@ -280,22 +278,24 @@ public class RecoverAnnotationRecoveryHandler<T> implements MethodInvocationReco
 	}
 
 	private void optionallyFilterMethodsBy(Class<?> returnClass) {
-		Map<Method, SimpleMetadata> filteredMethods = new HashMap<Method, SimpleMetadata>();
+		Map<Method, SimpleMetadata> filteredMethods = new HashMap<>();
 		for (Method method : this.methods.keySet()) {
 			if (method.getReturnType() == returnClass) {
 				filteredMethods.put(method, this.methods.get(method));
 			}
 		}
 		if (filteredMethods.size() > 0) {
-			this.methods = filteredMethods;
+			this.methods.clear();
+			;
+			this.methods.putAll(filteredMethods);
 		}
 	}
 
 	private static class SimpleMetadata {
 
-		private int argCount;
+		private final int argCount;
 
-		private Class<? extends Throwable> type;
+		private final Class<? extends Throwable> type;
 
 		public SimpleMetadata(int argCount, Class<? extends Throwable> type) {
 			super();
@@ -318,7 +318,7 @@ public class RecoverAnnotationRecoveryHandler<T> implements MethodInvocationReco
 				result[0] = t;
 				startArgs = 1;
 			}
-			int length = result.length - startArgs > args.length ? args.length : result.length - startArgs;
+			int length = Math.min(result.length - startArgs, args.length);
 			if (length == 0) {
 				return result;
 			}
