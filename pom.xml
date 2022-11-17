@@ -26,17 +26,16 @@
 		</license>
 	</licenses>
 	<properties>
-		<revision>2.0.0-SNAPSHOT</revision>
+		<revision>2.0.1-SNAPSHOT</revision>
 		<disable.checks>false</disable.checks>
 		<java.version>17</java.version>
-		<maven.test.failure.ignore>true</maven.test.failure.ignore>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 		<junit-jupiter.version>5.8.2</junit-jupiter.version>
 		<assertj.version>3.21.0</assertj.version>
 		<log4j.version>2.17.2</log4j.version>
 
-		<spring.framework.version>6.0.0-SNAPSHOT</spring.framework.version>
+		<spring.framework.version>6.0.0</spring.framework.version>
 	</properties>
 
 	<profiles>
@@ -86,12 +85,6 @@
 					</snapshots>
 				</pluginRepository>
 			</pluginRepositories>
-		</profile>
-		<profile>
-			<id>strict</id>
-			<properties>
-				<maven.test.failure.ignore>false</maven.test.failure.ignore>
-			</properties>
 		</profile>
 		<profile>
 			<id>fast</id>

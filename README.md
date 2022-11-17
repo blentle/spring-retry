@@ -597,6 +597,24 @@ When evaluating at runtime, a root object containing the method arguments is pas
 **Note:** The arguments are not available until the method has been called at least once; they will be null initially, which means, for example, you can't set the initial `maxAttempts` using an argument value, you can, however, change the `maxAttempts` after the first failure and before any retries are performed.
 Also, the arguments are only available when using stateless retry (which includes the `@CircuitBreaker`).
 
+Version 2.0 adds more flexibility to exception classification.
+
+```java
+@Retryable(retryFor = RuntimeException.class, noRetryFor = IllegalStateException.class, notRecoverable = {
+        IllegalArgumentException.class, IllegalStateException.class })
+public void service() {
+    ...
+}
+
+@Recover
+public void recover(Throwable cause) {
+    ...
+}
+```
+
+`retryFor` and `noRetryFor` are replacements of `include` and `exclude` properties, which are now deprecated.
+The new `notRecoverable` property allows the recovery method(s) to be skipped, even if one matches the exception type; the exception is thrown to the caller either after retries are exhausted, or immediately, if the exception is not retryable.
+
 ##### Examples
 
 ```java
@@ -635,6 +653,94 @@ line  to your `build.gradle` file:
 
 ```
     runtime('org.aspectj:aspectjweaver:1.8.13')
+```
+### Further customizations
+
+Starting from version 1.3.2 and later `@Retryable` annotation can be used in custom composed annotations to create your own annotations with predefined behaviour.
+For example if you discover you need two kinds of retry strategy, one for local services calls, and one for remote services calls, you could decide
+to create two custom annotations `@LocalRetryable` and `@RemoteRetryable` that differs in the retry strategy as well in the maximum number of retries.
+
+To make custom annotation composition work properly you can use `@AliasFor` annotation, for example on the `recover` method, so that you can further extend the versatility of your custom annotations and allow the `recover` argument value
+to be picked up as if it was set on the `recover` method of the base `@Retryable` annotation.
+
+Usage Example:
+```java
+@Service
+class Service {
+    ...
+    
+    @LocalRetryable(include = TemporaryLocalException.class, recover = "service1Recovery")
+    public List<Thing> service1(String str1, String str2){
+        //... do something
+    }
+    
+    public List<Thing> service1Recovery(TemporaryLocalException ex,String str1, String str2){
+        //... Error handling for service1
+    }
+    ...
+    
+    @RemoteRetryable(include = TemporaryRemoteException.class, recover = "service2Recovery")
+    public List<Thing> service2(String str1, String str2){
+        //... do something
+    }
+
+    public List<Thing> service2Recovery(TemporaryRemoteException ex, String str1, String str2){
+        //... Error handling for service2
+    }
+    ...
+}
+```
+
+```java
+@Target({ ElementType.METHOD, ElementType.TYPE })
+@Retention(RetentionPolicy.RUNTIME)
+@Retryable(maxAttempts = "3", backoff = @Backoff(delay = "500", maxDelay = "2000", random = true)
+)
+public @interface LocalRetryable {
+    
+    @AliasFor(annotation = Retryable.class, attribute = "recover")
+    String recover() default "";
+
+    @AliasFor(annotation = Retryable.class, attribute = "value")
+    Class<? extends Throwable>[] value() default {};
+
+    @AliasFor(annotation = Retryable.class, attribute = "include")
+
+    Class<? extends Throwable>[] include() default {};
+
+    @AliasFor(annotation = Retryable.class, attribute = "exclude")
+    Class<? extends Throwable>[] exclude() default {};
+
+    @AliasFor(annotation = Retryable.class, attribute = "label")
+    String label() default "";
+
+}
+```
+
+```java
+@Target({ ElementType.METHOD, ElementType.TYPE })
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+@Retryable(maxAttempts = "5", backoff = @Backoff(delay = "1000", maxDelay = "30000", multiplier = "1.2", random = true)
+)
+public @interface RemoteRetryable {
+    
+    @AliasFor(annotation = Retryable.class, attribute = "recover")
+    String recover() default "";
+
+    @AliasFor(annotation = Retryable.class, attribute = "value")
+    Class<? extends Throwable>[] value() default {};
+
+    @AliasFor(annotation = Retryable.class, attribute = "include")
+    Class<? extends Throwable>[] include() default {};
+
+    @AliasFor(annotation = Retryable.class, attribute = "exclude")
+    Class<? extends Throwable>[] exclude() default {};
+
+    @AliasFor(annotation = Retryable.class, attribute = "label")
+    String label() default "";
+
+}
 ```
 
 ### XML Configuration
